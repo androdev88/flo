@@ -89,6 +89,9 @@ static int device_setup[SNDRV_CARDS]; /* device parameter for this card */
 static bool ignore_ctl_error;
 struct switch_dev *usbaudiosdev;
 
+//extern int usbhost_uvcaudio_off; // tmtmtm    commented out to compile as module
+static int uvcaudio_off_on_probe=0; // tmtmtm
+
 module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for the USB audio adapter.");
 module_param_array(id, charp, NULL, 0444);
@@ -481,6 +484,20 @@ snd_usb_audio_probe(struct usb_device *dev,
 		/* it's a fresh one.
 		 * now look for an empty slot and create a new card instance
 		 */
+        // tmtmtm: do not accept/use secondary usb_audio devices
+        //if(usbhost_uvcaudio_off>0) {
+            int count_registered=0;
+            for (i = 0; i < SNDRV_CARDS; i++)
+                if(enable[i] && usb_chip[i])
+                    count_registered++;
+            //snd_printk(KERN_ERR "snd_usb_audio_probe %04x:%04x ifnum=%d usbhost_uvcaudio_off=%d count_registered=%d ########\n",
+            //        dev->descriptor.idVendor,dev->descriptor.idProduct,ifnum,usbhost_uvcaudio_off,count_registered);
+            if(count_registered>0) {
+                uvcaudio_off_on_probe++;
+                printk(KERN_ERR "uvcaudio_off: ignore secondary usb audio device; uvcaudio_off_on_probe set\n");
+                goto __error;
+            }
+        //}
 		for (i = 0; i < SNDRV_CARDS; i++)
 			if (enable[i] && ! usb_chip[i] &&
 			    (vid[i] == -1 || vid[i] == USB_ID_VENDOR(id)) &&
@@ -556,6 +573,12 @@ static void snd_usb_audio_disconnect(struct usb_device *dev,
 
 	if (chip == (void *)-1L)
 		return;
+
+	if(uvcaudio_off_on_probe>0) {
+		snd_printk(KERN_ERR "snd_usb_audio_disconnect skip\n"); // tmtmtm
+		uvcaudio_off_on_probe--;
+		return;
+	}
 
 	card = chip->card;
 	mutex_lock(&register_mutex);

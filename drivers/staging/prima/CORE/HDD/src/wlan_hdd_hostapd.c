@@ -2201,7 +2201,7 @@ static int iw_softap_setwpsie(struct net_device *dev,
    hdd_hostapd_state_t *pHostapdState;
    eHalStatus halStatus= eHAL_STATUS_SUCCESS;
    u_int8_t *wps_genie;
-   u_int8_t *fwps_genie;
+   u_int8_t *fwps_genie=NULL; //TMTMTM
    u_int8_t *pos;
    tpSap_WPSIE pSap_WPSIe;
    u_int8_t WPSIeType;
@@ -2759,7 +2759,7 @@ int iw_get_softap_linkspeed(struct net_device *dev,
    char *pLinkSpeed = (char*)extra;
    char *pmacAddress;
    v_U32_t link_speed;
-   unsigned short staId;
+   unsigned short staId=0; //TMTMTM
    int len = sizeof(v_U32_t)+1;
    v_BYTE_t macAddress[VOS_MAC_ADDR_SIZE];
    VOS_STATUS status;

@@ -2644,4 +2644,10 @@ config FORCE_FAST_CHARGE
 	  A simple sysfs interface to force adapters that
 	  are detected as USB to charge as AC.
 
+config USBHOST  # tmtmtm
+	bool "USBHOST related runtime configuration"
+	default y
+ 	help
+ 	  A simple sysfs interface to allow switching between OTG and FI mode.
+
 endif

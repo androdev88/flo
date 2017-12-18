@@ -104,7 +104,18 @@ static void powermate_irq(struct urb *urb)
 
 	/* handle updates to device state */
 	input_report_key(pm->input, BTN_0, pm->data[0] & 0x01);
-	input_report_rel(pm->input, REL_DIAL, pm->data[1]);
+
+	// LEFT
+	if ((int)pm->data[1] == -1) {
+		input_report_key(pm->input, KEY_UP, 1);
+		input_report_key(pm->input, KEY_UP, 0);
+	}
+
+	// RIGHT
+	if ((int)pm->data[1] == 1) {
+		input_report_key(pm->input, KEY_DOWN, 1);
+		input_report_key(pm->input, KEY_DOWN, 0);
+	}
 	input_sync(pm->input);
 
 exit:
@@ -361,11 +372,11 @@ static int powermate_probe(struct usb_interface *intf, const struct usb_device_i
 
 	input_dev->event = powermate_input_event;
 
-	input_dev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_REL) |
-		BIT_MASK(EV_MSC);
-	input_dev->keybit[BIT_WORD(BTN_0)] = BIT_MASK(BTN_0);
-	input_dev->relbit[BIT_WORD(REL_DIAL)] = BIT_MASK(REL_DIAL);
+	input_dev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_MSC);
+	input_dev->keybit[BIT_WORD(BTN_0)] |= BIT_MASK(BTN_0);
 	input_dev->mscbit[BIT_WORD(MSC_PULSELED)] = BIT_MASK(MSC_PULSELED);
+	input_dev->keybit[BIT_WORD(KEY_DOWN)] |= BIT_MASK(KEY_DOWN);
+	input_dev->keybit[BIT_WORD(KEY_UP)] |= BIT_MASK(KEY_UP);
 
 	/* get a handle to the interrupt data pipe */
 	pipe = usb_rcvintpipe(udev, endpoint->bEndpointAddress);
@@ -444,7 +455,18 @@ static struct usb_driver powermate_driver = {
         .id_table =     powermate_devices,
 };
 
-module_usb_driver(powermate_driver);
+static int __init powermate_init(void)
+{
+	return usb_register(&powermate_driver);
+}
+
+static void __exit powermate_cleanup(void)
+{
+	usb_deregister(&powermate_driver);
+}
+
+module_init(powermate_init);
+module_exit(powermate_cleanup);
 
 MODULE_AUTHOR( "William R Sowerbutts" );
 MODULE_DESCRIPTION( "Griffin Technology, Inc PowerMate driver" );

@@ -25,6 +25,9 @@
 
 #include <asm/mach/time.h>
 
+#include <linux/delay.h>	// tmtmtm msleep()
+extern int usbhost_firm_sleep;
+
 #define ANDROID_ALARM_PRINT_ERROR (1U << 0)
 #define ANDROID_ALARM_PRINT_INIT_STATUS (1U << 1)
 #define ANDROID_ALARM_PRINT_TSET (1U << 2)
@@ -34,7 +37,10 @@
 #define ANDROID_ALARM_PRINT_FLOW (1U << 6)
 
 static int debug_mask = ANDROID_ALARM_PRINT_ERROR | \
-			ANDROID_ALARM_PRINT_INIT_STATUS;
+			ANDROID_ALARM_PRINT_INIT_STATUS
+            | ANDROID_ALARM_PRINT_CALL          // tmtmtm
+            | ANDROID_ALARM_PRINT_SUSPEND       // tmtmtm
+			;
 module_param_named(debug_mask, debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP);
 
 #define pr_alarm(debug_level_mask, args...) \
@@ -366,6 +372,13 @@ static enum hrtimer_restart alarm_timer_triggered(struct hrtimer *timer)
 				ktime_to_ns(alarm->softexpires));
 			break;
 		}
+        // tmtmtm ANDROID_ALARM_RTC_WAKEUP=0, ANDROID_ALARM_ELAPSED_REALTIME_WAKEUP=2
+        // see: include/linux/android_alarm.h
+        if((alarm->type==ANDROID_ALARM_RTC_WAKEUP
+            || alarm->type==ANDROID_ALARM_ELAPSED_REALTIME_WAKEUP
+           ) && usbhost_firm_sleep && suspended) {
+            break;
+        }
 		base->first = rb_next(&alarm->node);
 		rb_erase(&alarm->node, &base->alarms);
 		RB_CLEAR_NODE(&alarm->node);

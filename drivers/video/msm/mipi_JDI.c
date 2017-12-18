@@ -253,10 +253,21 @@ static int mipi_JDI_lcd_off(struct platform_device *pdev)
 	return 0;
 }
 
+extern int usbhost_backlight_off;
+int last_backlight_level=100;
+
 static void JDI_command_backlight(int level)
 {
-	pr_debug("%s: back light level %d\n", __func__, level);
+    if(usbhost_backlight_off>0 || last_backlight_level==0) { // tmtmtm
+        if(level<=6) {
+            level=0;	// tmtmtm: allow brightness level below 1
+            printk("tmtmtm mipi_JDI.c JDI_command_backlight   fix=%d usbhost_backlight_off=%d last_backlight_level=%d\n",
+                   level, usbhost_backlight_off,last_backlight_level); // tmtmtm
+        }
+    }
+    pr_debug("%s: back light level %d\n", __func__, level);
 	bl_value[1] = (char) level;
+	last_backlight_level = level;
 
 	/* mdp4_dsi_cmd_busy_wait: will turn on dsi clock also */
 	mipi_dsi_mdp_busy_wait();

@@ -68,7 +68,7 @@ lookup_exec_domain(unsigned int personality)
 				goto out;
 	}
 
-#ifdef CONFIG_MODULES
+#ifdef NOTDEFINED //CONFIG_MODULES	// tmtmtm see: https://groups.google.com/forum/#!topic/android-porting/0e5RrrvQ2MU
 	read_unlock(&exec_domains_lock);
 	request_module("personality-%d", pers);
 	read_lock(&exec_domains_lock);

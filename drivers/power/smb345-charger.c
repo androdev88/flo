@@ -137,6 +137,21 @@ static bool wpc_en;
 static bool disable_DCIN;
 static int float_volt_setting = 4300;
 
+extern int usbhost_fixed_install_mode;
+extern int usbhost_fastcharge_in_host_mode;
+extern int usbhost_hostmode;
+extern int usbhost_charging_state;
+extern volatile int usbhost_external_power;
+extern volatile int usbhost_charge_slave_devices;
+extern volatile unsigned long usbhost_wake_in_suspend_total_ms;
+extern int usbhost_fetching_ma;
+extern int usbhost_poweroff_counter;
+#define MAX_FETCH_MA 1200
+
+extern struct timespec wakeStartTP; // from arch/arm/mach-msm/pm-8x60.c
+extern bool otg_plugged;
+struct timespec lastPowerOn;
+
 /* Sysfs interface */
 static DEVICE_ATTR(reg_status, S_IWUSR | S_IRUGO, smb345_reg_show, NULL);
 static DEVICE_ATTR(float_voltage, 0644, smb345_float_voltage_show,
@@ -420,6 +435,8 @@ smb345_set_InputCurrentlimit(struct i2c_client *client, u32 current_setting)
 	else
 		charger->curr_limit = 2000;
 
+    usbhost_fetching_ma = charger->curr_limit;
+
 	if (current_setting > 900) {
 		charger->time_of_1800mA_limit = jiffies;
 	} else{
@@ -460,7 +477,15 @@ error:
 
 static irqreturn_t smb345_inok_isr(int irq, void *dev_id)
 {
-	SMB_NOTICE("VBUS_DET = %s\n", gpio_get_value(GPIO_AC_OK) ? "H" : "L");
+	int status = gpio_get_value(GPIO_AC_OK);
+
+    SMB_NOTICE("smb345_inok_isr VBUS_DET = %s, ac_on=%d\n", status ? "H" : "L", ac_on);
+
+    if(status) {
+        // power off
+        usbhost_poweroff_counter++;
+        wakeStartTP.tv_sec = 0l;
+    }
 
 	return IRQ_HANDLED;
 }
@@ -725,13 +750,15 @@ static int smb345_configure_otg(struct i2c_client *client)
 		goto error;
        }
 
-	/* Change "OTG output current limit" to 250mA */
-      ret = smb345_write(client, smb345_OTG_TLIM_REG, 0x34);
+    if(!usbhost_fixed_install_mode && !usbhost_charging_state) {
+		/* Change "OTG output current limit" to 250mA */
+       ret = smb345_write(client, smb345_OTG_TLIM_REG, 0x34);
        if (ret < 0) {
-		dev_err(&client->dev, "%s(): Failed in writing"
+		 dev_err(&client->dev, "%s(): Failed in writing"
 			"register 0x%02x\n", __func__, smb345_OTG_TLIM_REG);
-		goto error;
+		 goto error;
        }
+    }
 
 	/* Enable OTG */
        ret = smb345_update_reg(client, smb345_CMD_REG, 0x10);
@@ -741,13 +768,15 @@ static int smb345_configure_otg(struct i2c_client *client)
 		goto error;
        }
 
-	/* Change "OTG output current limit" from 250mA to 750mA */
-	ret = smb345_update_reg(client, smb345_OTG_TLIM_REG, 0x08);
+    if(!usbhost_fixed_install_mode && !usbhost_charging_state) {
+        /* Change "OTG output current limit" from 250mA to 750mA */
+       ret = smb345_update_reg(client, smb345_OTG_TLIM_REG, 0x08);
        if (ret < 0) {
-	       dev_err(&client->dev, "%s: Failed in writing register"
-			"0x%02x\n", __func__, smb345_OTG_TLIM_REG);
-		goto error;
+           dev_err(&client->dev, "%s: Failed in writing register"
+            "0x%02x\n", __func__, smb345_OTG_TLIM_REG);
+        goto error;
        }
+    }
 
 	/* Change OTG to Pin control */
        ret = smb345_write(client, smb345_CTRL_REG, 0x65);
@@ -777,7 +806,6 @@ void smb345_otg_status(bool on)
 	SMB_NOTICE("otg function: %s\n", on ? "on" : "off");
 
 	if (on) {
-		otg_on = true;
 		/* ENABLE OTG */
 		ret = smb345_configure_otg(client);
 		if (ret < 0) {
@@ -785,11 +813,19 @@ void smb345_otg_status(bool on)
 				"otg..\n", __func__);
 			return;
 		}
+
+		otg_on = true;
+		usbhost_hostmode = 1;
+		otg_plugged = true;
+
 		if (wireless_is_plugged())
 			wireless_reset();
 		return;
-	} else
-		otg_on = false;
+	}
+
+	otg_on = false;
+	usbhost_hostmode = 0;
+	otg_plugged = false;
 
 	if (wireless_is_plugged())
 		wireless_set();
@@ -860,15 +896,26 @@ int usb_cable_type_detect(unsigned int chgr_type)
 			}
 		}
 		success =  bq27541_battery_callback(non_cable);
+
+        usbhost_external_power = 0;
+        usbhost_charging_state = 0;
+        usbhost_fetching_ma = 0;
+
 		touch_callback(non_cable);
 	} else {
 		SMB_NOTICE("INOK=L\n");
+
+	    usbhost_external_power = 1;
+		usbhost_charging_state = 1;
 
 		if (chgr_type == CHARGER_SDP) {
 			SMB_NOTICE("Cable: SDP\n");
 			smb345_vflt_setting();
 			success =  bq27541_battery_callback(usb_cable);
 			touch_callback(usb_cable);
+
+			smb345_set_InputCurrentlimit(client, 500);
+
 		} else {
 			if (chgr_type == CHARGER_CDP) {
 				SMB_NOTICE("Cable: CDP\n");
@@ -878,6 +925,7 @@ int usb_cable_type_detect(unsigned int chgr_type)
 				SMB_NOTICE("Cable: OTHER\n");
 			} else if (chgr_type == CHARGER_ACA) {
 				SMB_NOTICE("Cable: ACA\n");
+				usbhost_charging_state = 2;
 			} else {
 				SMB_NOTICE("Cable: TBD\n");
 				smb345_vflt_setting();
@@ -911,6 +959,29 @@ done:
 	return success;
 }
 EXPORT_SYMBOL_GPL(usb_cable_type_detect);
+
+void smb345_event_fi(void) {
+	// called by usbhost.c sysfs change from user space
+	if(usbhost_fixed_install_mode>0) {
+		// from OTG to FI: disable slave charging
+	} else {
+		// from FI to OTG: enable slave charging
+	}
+}
+//EXPORT_SYMBOL_GPL(smb345_event_fi);
+
+void smb345_event_fastcharge(void) {
+	// called by usbhost.c sysfs change from user space
+	if(usbhost_charging_state) {
+		if(usbhost_fastcharge_in_host_mode) {
+			usb_cable_type_detect(CHARGER_ACA);
+		} else {
+			usb_cable_type_detect(CHARGER_SDP);  // was CHARGER_DCP (in error)
+		}
+	}
+}
+//EXPORT_SYMBOL_GPL(smb345_event_fastcharge);
+
 
 /* Sysfs function */
 static ssize_t smb345_reg_show(struct device *dev, struct device_attribute *attr, char *buf)
@@ -1001,13 +1072,15 @@ static int smb345_otg_setting(struct i2c_client *client)
 		goto error;
        }
 
-	/* Change "OTG output current limit" to 250mA */
-	ret = smb345_update_reg(client, smb345_OTG_TLIM_REG, 0x34);
-       if (ret < 0) {
-		dev_err(&client->dev, "%s(): Failed in writing"
-			"register 0x%02x\n", __func__, smb345_OTG_TLIM_REG);
-		goto error;
-       }
+    if(!usbhost_fixed_install_mode && !usbhost_charging_state) {
+        /* Change "OTG output current limit" to 250mA */
+        ret = smb345_update_reg(client, smb345_OTG_TLIM_REG, 0x34);
+           if (ret < 0) {
+            dev_err(&client->dev, "%s(): Failed in writing"
+                "register 0x%02x\n", __func__, smb345_OTG_TLIM_REG);
+            goto error;
+           }
+    }
 
 	/* Disable volatile writes to registers */
 	ret = smb345_volatile_writes(client, smb345_DISABLE_WRITE);
@@ -1396,6 +1469,8 @@ static struct i2c_driver smb345_i2c_driver = {
 
 static int __init smb345_init(void)
 {
+	lastPowerOn.tv_sec = 0l;
+	lastPowerOn.tv_nsec = 0l;
 	return i2c_add_driver(&smb345_i2c_driver);
 }
 module_init(smb345_init);

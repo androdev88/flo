@@ -89,6 +89,9 @@ extern unsigned  get_usb_cable_status(void);
 extern int smb345_config_thermal_charging(int temp, int volt, int rule);
 extern void reconfig_AICL(void);
 
+extern int usbhost_charging_ma;
+extern int usbhost_fetching_ma;
+
 module_param(battery_current, uint, 0644);
 module_param(battery_remaining_capacity, uint, 0644);
 
@@ -482,6 +485,12 @@ int bq27541_battery_callback(unsigned usb_cable_state)
 	printk("bq27541_battery_callback  usb_cable_state = %x\n", usb_cable_state) ;
        printk("========================================================\n");
 
+	if(usb_cable_state==0)
+		usbhost_fetching_ma = 0;
+	else
+	if(usb_cable_state==1)
+		usbhost_fetching_ma = 500;
+
 	if (old_cable_status != bq27541_battery_cable_status) {
 		printk(KERN_INFO"battery_callback cable_wake_lock 5 sec...\n ");
 		wake_lock_timeout(&bq27541_device->cable_wake_lock, 5*HZ);
@@ -595,6 +604,7 @@ static int bq27541_get_psp(int reg_offset, enum power_supply_property psp,
 	}
 	if (psp == POWER_SUPPLY_PROP_CURRENT_NOW) {
 		val->intval = (s16)rt_value;
+		usbhost_charging_ma = val->intval;
 		BAT_NOTICE("current_now = %d mA\n", val->intval);
 	}
 	if (psp == POWER_SUPPLY_PROP_VOLTAGE_NOW) {
@@ -654,7 +664,7 @@ static int bq27541_get_psp(int reg_offset, enum power_supply_property psp,
 		}
 
 		bq27541_device->old_temperature = val->intval = ret;
-		BAT_NOTICE("temperature= %d (0.1¢XC)\n", val->intval);
+		BAT_NOTICE("temperature= %d (0.1ï¿½XC)\n", val->intval);
 	}
 	return 0;
 }
